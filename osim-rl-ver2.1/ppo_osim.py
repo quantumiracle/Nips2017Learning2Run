@@ -7,11 +7,11 @@ from osim.env import L2RunEnv
 import argparse
 tf.random.set_random_seed(123)
 EP_MAX = 10000
-EP_LEN = 20
+EP_LEN = 300
 GAMMA = 0.9
 A_LR = 1e-4
 C_LR = 2e-4
-BATCH = 64
+BATCH = 64  # should be smaller than episode_length
 A_UPDATE_STEPS = 10
 C_UPDATE_STEPS = 10
 S_DIM, A_DIM = 43,18  # action value range [0,1]
