@@ -12,3 +12,5 @@ torchvision==0.2.2.post3
 tensorflow==1.13.1
 
 tensorflow-estimator==1.13.0
+
+**Install the Osim environment following [here](https://github.com/stanfordnmbl/osim-rl) and run `python ./osim-rl-ver2.1/sac_multi.py --train`**.
