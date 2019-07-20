@@ -13,4 +13,4 @@ tensorflow==1.13.1
 
 tensorflow-estimator==1.13.0
 
-**Install the Osim environment following [here](https://github.com/stanfordnmbl/osim-rl) and run `python ./osim-rl-ver2.1/sac_multi.py --train`**.
+**Install the Osim environment following [here](https://github.com/stanfordnmbl/osim-rl) or using the [docker](https://hub.docker.com/r/stanfordnmbl/opensim-rl) (`docker pull stanfordnmbl/opensim-rl`), then run `python ./osim-rl-ver2.1/sac_multi.py --train` for training**.
