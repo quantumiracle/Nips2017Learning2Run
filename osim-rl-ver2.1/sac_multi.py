@@ -328,7 +328,7 @@ class SAC_Trainer():
 
 
 def worker(id, sac_trainer, rewards_queue, replay_buffer, max_episodes, max_steps, batch_size, explore_steps, \
-            update_itr, AUTO_ENTROPY, DETERMINISTIC, hidden_dim, model_path):
+            update_itr, action_itr, AUTO_ENTROPY, DETERMINISTIC, hidden_dim, model_path):
     '''
     the function for sampling with multi-processing
     '''
@@ -354,18 +354,19 @@ def worker(id, sac_trainer, rewards_queue, replay_buffer, max_episodes, max_step
                 action = sac_trainer.policy_net.get_action(state, deterministic = DETERMINISTIC)
             else:
                 action = sac_trainer.policy_net.sample_action()
-    
-            try:
-                next_state, reward, done, _= env.step(action) 
-            except KeyboardInterrupt:
-                print('Finished')
-                sac_trainer.save_model(model_path)
-    
-            replay_buffer.push(state, action, reward, next_state, done)
             
-            state = next_state
-            episode_reward += reward
-            frame_idx += 1
+            for _ in range(action_itr):
+                try:
+                    next_state, reward, done, _= env.step(action) 
+                except KeyboardInterrupt:
+                    print('Finished')
+                    sac_trainer.save_model(model_path)
+        
+                replay_buffer.push(state, action, reward, next_state, done)
+                
+                state = next_state
+                episode_reward += reward
+                frame_idx += 1
             
             
             # if len(replay_buffer) > batch_size:
@@ -435,8 +436,9 @@ if __name__ == '__main__':
     max_episodes  = 100000
     max_steps   = 300 
     explore_steps = 0  # for random action sampling in the beginning of training
-    batch_size=256
+    batch_size=640
     update_itr = 1
+    action_itr  = 3
     AUTO_ENTROPY=True
     DETERMINISTIC=False
     hidden_dim = 512
@@ -460,13 +462,13 @@ if __name__ == '__main__':
 
         rewards_queue=mp.Queue()  # used for get rewards from all processes and plot the curve
 
-        num_workers=3  # or: mp.cpu_count()
+        num_workers=8  # or: mp.cpu_count()
         processes=[]
         rewards=[0]
 
         for i in range(num_workers):
             process = Process(target=worker, args=(i, sac_trainer, rewards_queue, replay_buffer, max_episodes, max_steps, \
-            batch_size, explore_steps, update_itr, AUTO_ENTROPY, DETERMINISTIC, hidden_dim, model_path))  # the args contain shared and not shared
+            batch_size, explore_steps, update_itr, action_itr, AUTO_ENTROPY, DETERMINISTIC, hidden_dim, model_path))  # the args contain shared and not shared
             process.daemon=True  # all processes closed when the main stops
             processes.append(process)
 
