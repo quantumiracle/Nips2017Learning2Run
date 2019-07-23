@@ -462,7 +462,7 @@ if __name__ == '__main__':
 
         rewards_queue=mp.Queue()  # used for get rewards from all processes and plot the curve
 
-        num_workers=8  # or: mp.cpu_count()
+        num_workers=1  # or: mp.cpu_count()
         processes=[]
         rewards=[0]
 
