@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Normal
+from tqdm import trange
 
 from IPython.display import clear_output
 import matplotlib.pyplot as plt
@@ -184,17 +185,18 @@ class PolicyNetwork(nn.Module):
 if __name__ == '__main__':
     """Meta"""
     use_cuda = True
-    num_workers = 0 or mp.cpu_count()
+    num_workers = mp.cpu_count() * 2
+    menv = mp.cpu_count()  # actually processing envs per batch
     state_dim = 43
     action_dim = 18
     action_range = 1.
     replay_buffer_size = 1e6
-    max_timesteps = 1e8
+    max_timesteps = 1e7
     max_steps = 300
+    batch_size = 1024 * int(menv ** 0.5)
+    warm_start = batch_size * 1
     explore_steps = 0  # for random action sampling in the beginning of training
-    batch_size = 640
-    update_itr = 1
-    action_itr = 3
+    update_itr = 1  # it will time sqrt(menv) actually
     AUTO_ENTROPY = True
     DETERMINISTIC = False
     hidden_dim = 512
@@ -210,18 +212,20 @@ if __name__ == '__main__':
     soft_tau = 1e-2
 
     """Init"""
-    env = make_vec_env(num_workers, max_steps)
+    env = make_vec_env(num_workers, max_steps, menv)
     if use_cuda:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     else:
         device = torch.device("cpu")
     replay_buffer = ReplayBuffer(replay_buffer_size, device)
-    soft_q_net1 = nn.DataParallel(SoftQNetwork(state_dim, action_dim, hidden_dim).to(device))
-    soft_q_net2 = nn.DataParallel(SoftQNetwork(state_dim, action_dim, hidden_dim).to(device))
-    target_soft_q_net1 = nn.DataParallel(SoftQNetwork(state_dim, action_dim, hidden_dim).to(device))
-    target_soft_q_net2 = nn.DataParallel(SoftQNetwork(state_dim, action_dim, hidden_dim).to(device))
-    policy_net = nn.DataParallel(
-        PolicyNetwork(state_dim, action_dim, hidden_dim, action_range).to(device))
+    soft_q_net1 = SoftQNetwork(state_dim, action_dim, hidden_dim).to(device)
+    soft_q_net1.load_state_dict(torch.load(model_path + '_q1'))
+    soft_q_net2 = SoftQNetwork(state_dim, action_dim, hidden_dim).to(device)
+    soft_q_net2.load_state_dict(torch.load(model_path + '_q2'))
+    target_soft_q_net1 = SoftQNetwork(state_dim, action_dim, hidden_dim).to(device)
+    target_soft_q_net2 = SoftQNetwork(state_dim, action_dim, hidden_dim).to(device)
+    policy_net = PolicyNetwork(state_dim, action_dim, hidden_dim, action_range).to(device)
+    policy_net.load_state_dict(torch.load(model_path + '_policy'))
     log_alpha = torch.zeros(1, dtype=torch.float32, requires_grad=True, device=device)
     print('Soft Q Network (1,2): ', soft_q_net1)
     print('Policy Network: ', policy_net)
@@ -239,25 +243,25 @@ if __name__ == '__main__':
     """Start training"""
     o = env.reset()
     rewards = []
-    max_iter = int(max_timesteps // num_workers)
-    for eps in range(1, max_iter + 1):
+    max_iter = int(max_timesteps // menv)
+    for eps in trange(1, max_iter + 1):
         if eps > explore_steps:
-            a = policy_net.module.get_action(o, deterministic=DETERMINISTIC)
+            a = policy_net.get_action(o, deterministic=DETERMINISTIC)
         else:
-            a = policy_net.module.sample_action(num_workers)
+            a = policy_net.sample_action(menv)
         o_, r, d, info = env.step(a)
-        for i in range(num_workers):
+        for i in range(len(o)):
             replay_buffer.push(o[i], a[i], r[i], o_[i], d[i])
         o = o_
 
-        if len(replay_buffer) > batch_size:
-            for i in range(update_itr):
+        if len(replay_buffer) > warm_start:
+            for i in range(update_itr * int(menv ** 0.5)):
                 state, action, reward, next_state, done = replay_buffer.sample(batch_size)
 
                 predicted_q_value1 = soft_q_net1(state, action)
                 predicted_q_value2 = soft_q_net2(state, action)
-                new_action, log_prob, z, mean, log_std = policy_net.module.evaluate(state)
-                new_next_action, next_log_prob, _, _, _ = policy_net.module.evaluate(next_state)
+                new_action, log_prob, z, mean, log_std = policy_net.evaluate(state)
+                new_next_action, next_log_prob, _, _, _ = policy_net.evaluate(next_state)
                 # normalize with batch mean and std
                 reward = reward_scale * (reward - reward.mean(dim=0)) / (reward.std(dim=0) + 1e-6)
                 # Updating alpha wrt entropy
@@ -325,7 +329,7 @@ if __name__ == '__main__':
                     rewards.append(episode_reward)
                 else:
                     rewards.append(rewards[-1] * 0.9 + episode_reward * 0.1)
-                if len(rewards) % 20 == 0:
+                if len(rewards) % num_workers == 0:
                     clear_output(True)
                     plt.figure(figsize=(20, 5))
                     plt.plot(rewards)

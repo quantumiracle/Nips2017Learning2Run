@@ -2,33 +2,28 @@
 Note that this file is adapted from `https://pypi.org/project/gym-vec-env` and
 `https://github.com/openai/baselines/blob/master/baselines/common/*_wrappers.py`
 """
-from multiprocessing import Process, Pipe
-
+from multiprocessing import Process, Queue
+import os
 import gym
 import numpy as np
 
 
-def _worker(remote, parent_remote, env_fn_wrapper):
-    parent_remote.close()
+def _worker(exclusive_queue, shared_queue, env_fn_wrapper):
     env = env_fn_wrapper.x()
+    pid = os.getpid()
     while True:
-        cmd, data = remote.recv()
+        cmd, data = exclusive_queue.get()
         if cmd == 'step':
             ob, reward, done, info = env.step(data)
             if done:
                 ob = env.reset()
-            remote.send((ob, reward, done, info))
+            shared_queue.put(((ob, reward, done, info), pid))
         elif cmd == 'reset':
             ob = env.reset()
-            remote.send(ob)
-        elif cmd == 'reset_task':
-            ob = env._reset_task()
-            remote.send(ob)
+            shared_queue.put(((ob, 0, False, {}), pid))
         elif cmd == 'close':
-            remote.close()
+            exclusive_queue.close()
             break
-        elif cmd == 'get_spaces':
-            remote.send((env.observation_space, env.action_space))
         else:
             raise NotImplementedError
 
@@ -37,6 +32,7 @@ class CloudpickleWrapper(object):
     """
     Uses cloudpickle to serialize contents
     """
+
     def __init__(self, x):
         self.x = x
 
@@ -50,35 +46,33 @@ class CloudpickleWrapper(object):
 
 
 class SubprocVecEnv(object):
-    def __init__(self, env_fns):
+    def __init__(self, env_fns, menv):
         """
         envs: list of gym environments to run in subprocesses
         """
-        self.num_envs = len(env_fns)
+        self.menv = menv  # env number in send buffer
+        self.num_envs = len(env_fns)  # all env in sample buffer
 
-        self.waiting = False
         self.closed = False
         nenvs = len(env_fns)
         self.nenvs = nenvs
-        self.remotes, self.work_remotes = zip(*[Pipe() for _ in range(nenvs)])
-        zipped_args = zip(self.work_remotes, self.remotes, env_fns)
+        env_queues = [Queue() for _ in range(nenvs)]
+        self.shared_queue = Queue()
         self.ps = [
             Process(target=_worker,
-                    args=(work_remote, remote, CloudpickleWrapper(env_fn)))
-            for (work_remote, remote, env_fn) in zipped_args
+                    args=(env_queues[i], self.shared_queue, CloudpickleWrapper(env_fns[i])))
+            for i in range(nenvs)
         ]
 
         for p in self.ps:
             # if the main process crashes, we should not cause things to hang
             p.daemon = True
             p.start()
-        for remote in self.work_remotes:
-            remote.close()
 
-        self.remotes[0].send(('get_spaces', None))
-        observation_space, action_space = self.remotes[0].recv()
-        self.observation_space = observation_space
-        self.action_space = action_space
+        self.env_queues = dict()
+        for p, queue in zip(self.ps, env_queues):
+            self.env_queues[p.pid] = queue
+        self.current_pids = None
 
     def _step_async(self, actions):
         """
@@ -88,9 +82,8 @@ class SubprocVecEnv(object):
             You should not call this if a step_async run is
             already pending.
             """
-        for remote, action in zip(self.remotes, actions):
-            remote.send(('step', action))
-        self.waiting = True
+        for pid, action in zip(self.current_pids, actions):
+            self.env_queues[pid].put(('step', action))
 
     def _step_wait(self):
         """
@@ -102,8 +95,12 @@ class SubprocVecEnv(object):
              - dones: an array of "episode done" booleans
              - infos: a sequence of info objects
             """
-        results = [remote.recv() for remote in self.remotes]
-        self.waiting = False
+        results = []
+        self.current_pids = []
+        while len(results) < self.menv:
+            data, pid = self.shared_queue.get()
+            results.append(data)
+            self.current_pids.append(pid)
         obs, rews, dones, infos = zip(*results)
         return np.stack(obs), np.stack(rews), np.stack(dones), infos
 
@@ -115,23 +112,22 @@ class SubprocVecEnv(object):
             be cancelled and step_wait() should not be called
             until step_async() is invoked again.
             """
-        for remote in self.remotes:
-            remote.send(('reset', None))
-        return np.stack([remote.recv() for remote in self.remotes])
-
-    def _reset_task(self):
-        for remote in self.remotes:
-            remote.send(('reset_task', None))
-        return np.stack([remote.recv() for remote in self.remotes])
+        for queue in self.env_queues.values():
+            queue.put(('reset', None))
+        results = []
+        self.current_pids = []
+        while len(results) < self.menv:
+            data, pid = self.shared_queue.get()
+            results.append(data[0])
+            self.current_pids.append(pid)
+        return np.stack(results)
 
     def close(self):
         if self.closed:
             return
-        if self.waiting:
-            for remote in self.remotes:
-                remote.recv()
-        for remote in self.remotes:
-            remote.send(('close', None))
+        for queue in self.env_queues.values():
+            queue.put(('close', None))
+        self.shared_queue.close()
         for p in self.ps:
             p.join()
             self.closed = True
@@ -189,10 +185,10 @@ def make_env(max_steps, seed):
     return Monitor(TimeLimit(env, max_steps))
 
 
-def make_vec_env(nenv, max_steps):
+def make_vec_env(nenv, max_steps, menv):
     """ Make vectorized env """
     from functools import partial
-    env = SubprocVecEnv([partial(make_env, max_steps, i) for i in range(nenv)])
+    env = SubprocVecEnv([partial(make_env, max_steps, i) for i in range(nenv)], menv)
     return env
 
 
