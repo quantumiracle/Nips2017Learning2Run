@@ -53,9 +53,9 @@ class ReplayBuffer(object):
         res = (
             torch.from_numpy(np.asarray(b_o)).to(self._device).float(),
             torch.from_numpy(np.asarray(b_a)).to(self._device).float(),
-            torch.from_numpy(np.asarray(b_r)).to(self._device).float(),
+            torch.from_numpy(np.asarray(b_r)).unsqueeze(1).to(self._device).float(),
             torch.from_numpy(np.asarray(b_o_)).to(self._device).float(),
-            torch.from_numpy(np.asarray(b_d)).to(self._device).float(),
+            torch.from_numpy(np.asarray(b_d)).unsqueeze(1).to(self._device).float(),
         )
         return res
 
@@ -219,13 +219,13 @@ if __name__ == '__main__':
         device = torch.device("cpu")
     replay_buffer = ReplayBuffer(replay_buffer_size, device)
     soft_q_net1 = SoftQNetwork(state_dim, action_dim, hidden_dim).to(device)
-    soft_q_net1.load_state_dict(torch.load(model_path + '_q1'))
+    # soft_q_net1.load_state_dict(torch.load(model_path + '_q1'))
     soft_q_net2 = SoftQNetwork(state_dim, action_dim, hidden_dim).to(device)
-    soft_q_net2.load_state_dict(torch.load(model_path + '_q2'))
+    # soft_q_net2.load_state_dict(torch.load(model_path + '_q2'))
     target_soft_q_net1 = SoftQNetwork(state_dim, action_dim, hidden_dim).to(device)
     target_soft_q_net2 = SoftQNetwork(state_dim, action_dim, hidden_dim).to(device)
     policy_net = PolicyNetwork(state_dim, action_dim, hidden_dim, action_range).to(device)
-    policy_net.load_state_dict(torch.load(model_path + '_policy'))
+    # policy_net.load_state_dict(torch.load(model_path + '_policy'))
     log_alpha = torch.zeros(1, dtype=torch.float32, requires_grad=True, device=device)
     print('Soft Q Network (1,2): ', soft_q_net1)
     print('Policy Network: ', policy_net)

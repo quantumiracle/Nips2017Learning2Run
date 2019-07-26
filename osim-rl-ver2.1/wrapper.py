@@ -112,7 +112,7 @@ class SubprocVecEnv(object):
             be cancelled and step_wait() should not be called
             until step_async() is invoked again.
             """
-        for queue in self.env_queues.values():
+        for queue in self.env_queues.values():  # initialize all
             queue.put(('reset', None))
         results = []
         self.current_pids = []
