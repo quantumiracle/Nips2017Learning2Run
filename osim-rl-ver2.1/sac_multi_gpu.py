@@ -39,7 +39,9 @@ import threading as td
 GPU = True
 device_idx = 0
 if GPU:
-    device = torch.device("cuda:" + str(device_idx) if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cuda:" + str(device_idx) if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 else:
     device = torch.device("cpu")
 print(device)
@@ -221,7 +223,6 @@ class SAC_Trainer():
         self.replay_buffer = replay_buffer
         if torch.cuda.device_count() > 1:
             print("Using", torch.cuda.device_count(), "GPUs!")
-            model = (model)
         else:
             print("Using one GPU!")
 
@@ -323,9 +324,14 @@ class SAC_Trainer():
         torch.save(self.policy_net.state_dict(), path+'_policy')
 
     def load_model(self, path):
-        self.soft_q_net1.load_state_dict(torch.load(path+'_q1')).module
-        self.soft_q_net2.load_state_dict(torch.load(path+'_q2')).module
-        self.policy_net.load_state_dict(torch.load(path+'_policy')).module
+        self.soft_q_net1.load_state_dict(torch.load(path+'_q1'))
+        self.soft_q_net2.load_state_dict(torch.load(path+'_q2'))
+        self.policy_net.load_state_dict(torch.load(path+'_policy'))
+        
+        # if not use DataParallel, get original single model
+        # self.soft_q_net1=self.soft_q_net1.module
+        # self.soft_q_net2=self.soft_q_net2.module
+        # self.policy_net=self.policy_net.module
 
         self.soft_q_net1.eval()
         self.soft_q_net2.eval()
@@ -447,7 +453,7 @@ if __name__ == '__main__':
     AUTO_ENTROPY=True
     DETERMINISTIC=False
     hidden_dim = 512
-    model_path = './sac_model/sac_v2_multi'
+    model_path = './sac_model/sac_v2_multi_gpu'
 
     sac_trainer=SAC_Trainer(replay_buffer, hidden_dim=hidden_dim, action_range=action_range )
 
@@ -501,7 +507,7 @@ if __name__ == '__main__':
             episode_reward = 0
 
             for step in range(max_steps):
-                action = sac_trainer.policy_net.get_action(state, deterministic = DETERMINISTIC)
+                action = sac_trainer.policy_net.module.get_action(state, deterministic = DETERMINISTIC)
                 next_state, reward, done, _= env.step(action)  
 
                 episode_reward += reward
