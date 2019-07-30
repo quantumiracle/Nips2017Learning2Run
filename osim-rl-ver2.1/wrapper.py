@@ -180,7 +180,7 @@ class TimeLimit(gym.Wrapper):
 
 def make_env(max_steps, seed):
     from osim.env import L2RunEnv  # load the env
-    env = L2RunEnv(visualize=False)
+    env = L2RunEnv(visualize=True)
     env.seed(seed)
     return Monitor(TimeLimit(env, max_steps))
 
