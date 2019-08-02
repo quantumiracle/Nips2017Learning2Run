@@ -587,9 +587,10 @@ if __name__ == '__main__':
         sac_trainer.target_soft_q_net1.share_memory()
         sac_trainer.target_soft_q_net2.share_memory()
         sac_trainer.policy_net.share_memory()
-        ShareParameters(sac_trainer.soft_q_optimizer1)
+        ShareParameters(sac_trainer.soft_q_optimizer1)  # share across processes
         ShareParameters(sac_trainer.soft_q_optimizer2)
         ShareParameters(sac_trainer.policy_optimizer)
+        ShareParameters(sac_trainer.alpha_optimizer)
 
         rewards_queue = mp.Queue()  # used for get rewards from all processes and plot the curve
 
