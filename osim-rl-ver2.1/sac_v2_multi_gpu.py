@@ -300,7 +300,7 @@ class PolicyNetwork(nn.Module):
 
     def get_action(self, state, deterministic):
         state = torch.FloatTensor(state).unsqueeze(0).cuda()
-        print(state)
+        # print(state)
         mean, log_std = self.forward(state)
         std = log_std.exp()
         
@@ -316,16 +316,26 @@ class PolicyNetwork(nn.Module):
         a = torch.FloatTensor(self.num_actions).uniform_(-1, 1)
         return self.action_range * a.numpy()
 
+class Alpha(nn.Module):
+    ''' nn.Module class of alpha variable, for the usage of parallel on gpus '''
+    def __init__(self):
+        super(Alpha, self).__init__()
+        self.log_alpha=torch.nn.Parameter(torch.zeros(1))  #initialized as [0.]: alpha->[1.]
+
+    def forward(self):
+        return self.log_alpha
 
 class SAC_Trainer():
     def __init__(self, replay_buffer, hidden_dim, action_range):
         self.replay_buffer = replay_buffer
+        self.action_dim = action_dim
 
         self.soft_q_net1 = SoftQNetwork(state_dim, action_dim, hidden_dim)
         self.soft_q_net2 = SoftQNetwork(state_dim, action_dim, hidden_dim)
         self.target_soft_q_net1 = SoftQNetwork(state_dim, action_dim, hidden_dim)
         self.target_soft_q_net2 = SoftQNetwork(state_dim, action_dim, hidden_dim)
         self.policy_net = PolicyNetwork(state_dim, action_dim, hidden_dim, action_range)
+        self.log_alpha = Alpha()
         print('Soft Q Network (1,2): ', self.soft_q_net1)
         print('Policy Network: ', self.policy_net)
 
@@ -341,10 +351,12 @@ class SAC_Trainer():
 
         soft_q_lr = 3e-4
         policy_lr = 3e-4
+        alpha_lr = 3e-4
 
         self.soft_q_optimizer1 = SharedAdam(self.soft_q_net1.parameters(), lr=soft_q_lr)
         self.soft_q_optimizer2 = SharedAdam(self.soft_q_net2.parameters(), lr=soft_q_lr)
         self.policy_optimizer = SharedAdam(self.policy_net.parameters(), lr=policy_lr)
+        self.alpha_optimizer = SharedAdam(self.log_alpha.parameters(), lr=alpha_lr)
 
     def to_cuda(self):  # copy to specified gpu
         self.soft_q_net1 = self.soft_q_net1.cuda()
@@ -352,6 +364,7 @@ class SAC_Trainer():
         self.target_soft_q_net1 = self.target_soft_q_net1.cuda()
         self.target_soft_q_net2 = self.target_soft_q_net2.cuda()
         self.policy_net = self.policy_net.cuda()
+        self.log_alpha = self.log_alpha.cuda()
 
     def update(self, batch_size, reward_scale=10., auto_entropy=True, target_entropy=-2, gamma=0.99,
                soft_tau=1e-2):
@@ -370,11 +383,22 @@ class SAC_Trainer():
         new_next_action, next_log_prob, _, _, _ = self.policy_net.evaluate(next_state)
         reward = reward_scale * (reward - reward.mean(dim=0)) / (reward.std(
             dim=0) + 1e-6)  # normalize with batch mean and std; plus a small number to prevent numerical problem
-        # Updating alpha wrt entropy
-        # alpha = 0.0  # trade-off between exploration (max entropy) and exploitation (max Q) 
-        self.alpha = 1.
-        alpha_loss = 0
 
+        # Updating alpha wrt entropy
+        # alpha = 0.0
+        # trade-off between exploration (max entropy) and exploitation (max Q)
+        if auto_entropy is True:
+            alpha_loss = -(self.log_alpha() * (log_prob - 1.0 * self.action_dim).detach()).mean()  # self.log_alpha as forward function to get value
+            # print('alpha loss: ',alpha_loss)
+            self.alpha_optimizer.zero_grad()
+            alpha_loss.backward()
+            self.alpha_optimizer.step()
+            self.alpha = self.log_alpha().exp()
+        else:
+            self.alpha = 1.
+            alpha_loss = 0
+
+        # print(self.alpha)
         # Training Q Function
         target_q_min = torch.min(self.target_soft_q_net1(next_state, new_next_action),
                                  self.target_soft_q_net2(next_state,
@@ -569,7 +593,7 @@ if __name__ == '__main__':
 
         rewards_queue = mp.Queue()  # used for get rewards from all processes and plot the curve
 
-        num_workers = 40  # or: mp.cpu_count()
+        num_workers = 2  # or: mp.cpu_count()
         processes = []
         rewards = [0]
 
@@ -606,7 +630,7 @@ if __name__ == '__main__':
             episode_reward = 0
 
             for step in range(max_steps):
-                print(state)
+                # print(state)
                 action = sac_trainer.policy_net.get_action(state, deterministic=DETERMINISTIC)
                 next_state, reward, done, _ = env.step(action)
 

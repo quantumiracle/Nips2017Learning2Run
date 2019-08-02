@@ -1,4 +1,7 @@
 '''
+SAC multi-process on single gpu
+
+
 Soft Actor-Critic version 2
 using target Q instead of V net: 2 Q net, 2 target Q net, 1 policy net
 add alpha loss compared with version 1
@@ -363,7 +366,7 @@ def worker(id, sac_trainer, rewards_queue, replay_buffer, max_episodes, max_step
                     sac_trainer.save_model(model_path)
         
                 replay_buffer.push(state, action, reward, next_state, done)
-                
+                print(state)
                 state = next_state
                 episode_reward += reward
                 frame_idx += 1

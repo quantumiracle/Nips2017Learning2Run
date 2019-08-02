@@ -1,3 +1,6 @@
+'''
+SAC multiprocessing with vectorized environment using wrapper, on single gpu
+'''
 import random
 
 import numpy as np
