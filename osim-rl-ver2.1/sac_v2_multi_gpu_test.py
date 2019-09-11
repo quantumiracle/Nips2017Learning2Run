@@ -451,16 +451,25 @@ class SAC_Trainer():
         torch.save(self.soft_q_net1.state_dict(),
                    path + '_q1')  # have to specify different path name here!
         torch.save(self.soft_q_net2.state_dict(), path + '_q2')
+        torch.save(self.target_soft_q_net1.state_dict(), path + '_target_q1')
+        torch.save(self.target_soft_q_net2.state_dict(), path + '_target_q2')
         torch.save(self.policy_net.state_dict(), path + '_policy')
+        torch.save(self.log_alpha.state_dict(), path + '_log_alpha') # save log_alpha variable
 
     def load_model(self, path):
         self.soft_q_net1.load_state_dict(torch.load(path + '_q1', map_location='cuda:0'))
         self.soft_q_net2.load_state_dict(torch.load(path + '_q2', map_location='cuda:0'))
+        self.target_soft_q_net1.load_state_dict(torch.load(path + '_target_q1', map_location='cuda:0'))
+        self.target_soft_q_net2.load_state_dict(torch.load(path + '_target_q2', map_location='cuda:0'))
         self.policy_net.load_state_dict(torch.load(path + '_policy', map_location='cuda:0'))
+        self.log_alpha.load_state_dict(torch.load(path + '_log_alpha', map_location='cuda:0'))
 
         self.soft_q_net1.eval()
         self.soft_q_net2.eval()
+        self.target_soft_q_net1.eval()
+        self.target_soft_q_net2.eval()
         self.policy_net.eval()
+        self.log_alpha.eval()
 
 
 def worker(id, sac_trainer, rewards_queue, replay_buffer, max_episodes, max_steps, batch_size,
@@ -621,7 +630,8 @@ if __name__ == '__main__':
                 break
 
             if len(rewards) % 20 == 0 and len(rewards) > 0:
-                plot(rewards)
+                # plot(rewards)  # this may cause memory leak if plotted figure not closed
+                np.save('reward_log', rewards)
 
         [p.join() for p in processes]  # finished at the same time
 
